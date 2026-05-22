@@ -1,9 +1,17 @@
-// Cash-flow timeline SVG component with animated D3 transitions.
-// Renders a horizontal year axis with face-value bars above and PV bars below.
+// Cash-flow timeline SVG component with animated entrance.
+// Uses per-selection transitions (no shared transition object — avoids
+// "transition N not found" when the cell re-runs on slider change).
 
 import * as d3 from "npm:d3";
 
 let _counter = 0;
+
+function tx(sel, {delay = 0, duration = 450} = {}) {
+  return sel.transition()
+    .duration(duration)
+    .ease(d3.easeCubicOut)
+    .delay(delay);
+}
 
 export function timeline({
   cashflows,
@@ -39,8 +47,8 @@ export function timeline({
   const defs = svg.append("defs");
   const grad = defs.append("linearGradient")
     .attr("id", `${uid}-bg`).attr("x1", "0%").attr("y1", "0%").attr("x2", "0%").attr("y2", "100%");
-  grad.append("stop").attr("offset", "0%").attr("stop-color", "#FAFBFD").attr("stop-opacity", 1);
-  grad.append("stop").attr("offset", "100%").attr("stop-color", "#EEF2F8").attr("stop-opacity", 1);
+  grad.append("stop").attr("offset", "0%").attr("stop-color", "#FAFBFD");
+  grad.append("stop").attr("offset", "100%").attr("stop-color", "#EEF2F8");
   svg.append("rect")
     .attr("x", 0).attr("y", 0).attr("width", width).attr("height", height)
     .attr("fill", `url(#${uid}-bg)`).attr("rx", 6);
@@ -67,27 +75,14 @@ export function timeline({
   }
 
   const barW = Math.min(28, (innerW / (maxYear + 1)) * 0.55);
-  const t = d3.transition().duration(450).ease(d3.easeCubicOut);
 
-  // CASH-FLOW BARS (face value) — animated entry
+  // CASH-FLOW BARS (face value)
   const cfGroup = svg.append("g").attr("class", "cf");
   cashflows.forEach((d, i) => {
     const isHi = highlightYear === d.year;
     const color = d.color || (d.amount >= 0 ? "#2E75B6" : "#C0504D");
     const targetH = hAmt(d.amount);
     const xPos = x(d.year) - barW / 2;
-
-    // Drop-shadow filter for the highlighted bar
-    if (isHi) {
-      const f = defs.append("filter").attr("id", `${uid}-glow-${i}`).attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
-      f.append("feGaussianBlur").attr("in", "SourceAlpha").attr("stdDeviation", 3);
-      f.append("feOffset").attr("dy", 1);
-      const cmp = f.append("feComponentTransfer");
-      cmp.append("feFuncA").attr("type", "linear").attr("slope", 0.7);
-      const merge = f.append("feMerge");
-      merge.append("feMergeNode");
-      merge.append("feMergeNode").attr("in", "SourceGraphic");
-    }
 
     const rect = cfGroup.append("rect")
       .attr("x", xPos).attr("y", axisY).attr("width", barW).attr("height", 0)
@@ -96,8 +91,7 @@ export function timeline({
       .attr("stroke", isHi ? "#FFB300" : "none")
       .attr("stroke-width", isHi ? 2.5 : 0)
       .attr("rx", 2);
-    if (isHi) rect.attr("filter", `url(#${uid}-glow-${i})`);
-    rect.transition(t).delay(i * 60)
+    tx(rect, {delay: i * 60})
       .attr("y", axisY - targetH).attr("height", targetH);
 
     const label = cfGroup.append("text")
@@ -106,7 +100,7 @@ export function timeline({
       .attr("font-size", 11).attr("font-weight", 600).attr("fill", "#222")
       .attr("opacity", 0)
       .text(d.label ?? `$${Math.round(d.amount).toLocaleString()}`);
-    label.transition(t).delay(i * 60 + 200)
+    tx(label, {delay: i * 60 + 200})
       .attr("y", axisY - targetH - 4).attr("opacity", 1);
   });
 
@@ -122,19 +116,19 @@ export function timeline({
         .attr("fill", "#A6C8E6").attr("opacity", 0.7)
         .attr("stroke", "#2E75B6").attr("stroke-width", 0.5)
         .attr("rx", 2);
-      rect.transition(t).delay(i * 60 + 80).attr("height", targetH);
+      tx(rect, {delay: i * 60 + 80}).attr("height", targetH);
 
-      pvGroup.append("text")
+      const lbl = pvGroup.append("text")
         .attr("x", x(d.year)).attr("y", axisY + 1 + targetH + 12)
         .attr("text-anchor", "middle")
         .attr("font-size", 10).attr("fill", "#1F3864")
         .attr("opacity", 0)
-        .text(`$${pv.toFixed(2)}`)
-        .transition(t).delay(i * 60 + 280).attr("opacity", 1);
+        .text(`$${pv.toFixed(2)}`);
+      tx(lbl, {delay: i * 60 + 280}).attr("opacity", 1);
     });
   }
 
-  // PERPETUITY TAIL — fades in
+  // PERPETUITY TAIL — fading-in bars
   if (perpetuityFromYear !== null) {
     const lastCF = cashflows.find(c => c.year === perpetuityFromYear);
     const tailAmt = lastCF ? lastCF.amount : (cashflows[cashflows.length - 1]?.amount ?? 5);
@@ -146,17 +140,17 @@ export function timeline({
       const opacity = Math.max(0.05, 0.7 - i * 0.1);
       const h = hAmt(tailAmt);
       const xPos = x(yr) - barW / 2;
-      tailGroup.append("rect")
+      const rect = tailGroup.append("rect")
         .attr("x", xPos).attr("y", axisY).attr("width", barW).attr("height", 0)
-        .attr("fill", tailColor).attr("opacity", 0).attr("rx", 2)
-        .transition(t).delay(400 + i * 80)
+        .attr("fill", tailColor).attr("opacity", 0).attr("rx", 2);
+      tx(rect, {delay: 400 + i * 80})
         .attr("y", axisY - h).attr("height", h).attr("opacity", opacity);
     }
-    tailGroup.append("text")
+    const inf = tailGroup.append("text")
       .attr("x", x(perpetuityFromYear + 6.5)).attr("y", axisY - hAmt(tailAmt) / 2)
       .attr("font-size", 26).attr("fill", "#7030A0").attr("opacity", 0)
-      .text("→∞")
-      .transition(t).delay(900).attr("opacity", 0.6);
+      .text("→∞");
+    tx(inf, {delay: 900}).attr("opacity", 0.6);
   }
 
   // Axis labels
@@ -174,21 +168,37 @@ export function timeline({
   return svg.node();
 }
 
-// Animated counter — tweens a number from previous value to new value over `ms` ms.
-// Returns an HTMLElement that updates itself. Optional prefix/suffix and decimals.
+// Tweened number — eases from previous to target over ms.
+// Auto-cancels the RAF when the host element is removed from the DOM.
 export function tweenNumber(value, {prefix = "", suffix = "", decimals = 2, ms = 400} = {}) {
   const el = document.createElement("span");
-  el.dataset.value = String(value);
-  el.style.cssText = "font-variant-numeric:tabular-nums;font-weight:700;";
+  el.style.cssText = "font-variant-numeric:tabular-nums;font-weight:inherit;";
   let prev = 0;
+  let raf = null;
+  let cancelled = false;
   const fmt = v => prefix + v.toLocaleString("en-US", {minimumFractionDigits: decimals, maximumFractionDigits: decimals}) + suffix;
   const start = performance.now();
   function tick(now) {
+    if (cancelled) return;
     const t = Math.min(1, (now - start) / ms);
     const eased = 1 - Math.pow(1 - t, 3);
     el.textContent = fmt(prev + (value - prev) * eased);
-    if (t < 1) requestAnimationFrame(tick);
+    if (t < 1) raf = requestAnimationFrame(tick);
   }
-  requestAnimationFrame(tick);
+  raf = requestAnimationFrame(tick);
+
+  // Cancel the RAF if the element gets removed from the DOM (cell re-run).
+  const obs = new MutationObserver(() => {
+    if (!el.isConnected && !cancelled) {
+      cancelled = true;
+      if (raf != null) cancelAnimationFrame(raf);
+      obs.disconnect();
+    }
+  });
+  // Wait one frame for the element to be attached, then observe its parent tree.
+  requestAnimationFrame(() => {
+    if (el.parentNode) obs.observe(el.parentNode, {childList: true, subtree: true});
+  });
+
   return el;
 }

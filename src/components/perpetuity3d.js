@@ -110,10 +110,12 @@ export function perpetuity3d({
   }
 
   // Slow ambient camera orbit so the depth/parallax is felt
-  let raf, t0 = performance.now();
+  let raf;
+  let stopped = false;
+  const t0 = performance.now();
   function animate(now) {
+    if (stopped) return;
     const t = (now - t0) / 1000;
-    const r = 13;
     camera.position.x = -7 + Math.sin(t * 0.12) * 1.4;
     camera.position.y = 5.5 + Math.sin(t * 0.16) * 0.7;
     camera.lookAt(8, 1.2, 0);
@@ -122,10 +124,12 @@ export function perpetuity3d({
   }
   raf = requestAnimationFrame(animate);
 
-  // Cleanup hook — Observable Framework calls invalidation
-  container._stop = () => {
-    cancelAnimationFrame(raf);
+  function dispose() {
+    if (stopped) return;
+    stopped = true;
+    if (raf != null) cancelAnimationFrame(raf);
     renderer.dispose();
+    renderer.forceContextLoss?.();
     scene.traverse(o => {
       if (o.geometry) o.geometry.dispose();
       if (o.material) {
@@ -133,7 +137,26 @@ export function perpetuity3d({
         o.material.dispose();
       }
     });
-  };
+  }
+
+  // Cleanup hook for explicit callers
+  container._stop = dispose;
+
+  // Auto-dispose when the container is removed from the DOM (Observable cell re-run).
+  // This is critical — browsers cap WebGL contexts at ~16, and each slider drag would
+  // otherwise leak a new context until rendering breaks entirely.
+  const obs = new MutationObserver(() => {
+    if (!container.isConnected) {
+      dispose();
+      obs.disconnect();
+    }
+  });
+  requestAnimationFrame(() => {
+    if (container.parentNode) obs.observe(container.parentNode, {childList: true, subtree: true});
+  });
+
+  // Also dispose on page unload as a backstop.
+  window.addEventListener("beforeunload", dispose, {once: true});
 
   return container;
 }
